@@ -7,6 +7,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Threading;
 
 namespace MikuSB.TcpSharp;
 
@@ -30,6 +31,7 @@ public class SocketConnection
 
     public int DownStreamSeqNo;
     public int UpStreamSeqNo;
+    public string SessionId { get; set; } = "";
 
     public PacketFraming Framing;
 
@@ -169,8 +171,11 @@ public class SocketConnection
 
         // DO NOT REMOVE (unless we find a way to validate code before sending to client which I don't think we can)
         if (BannedPackets.Contains(packet.CmdId)) return;
-        LogPacket("Send", packet.CmdId, packet.Body,Framing);
-        byte[] packetBytes = new PacketCodec().Encode(packet.CmdId, packet.Body,Framing);
+        LogPacket("Send", packet.CmdId, packet.Body, Framing);
+        if (packet.SeqNo == 0)
+            packet.SeqNo = (ushort)Interlocked.Increment(ref DownStreamSeqNo);
+        // On-wire wrapper seq must stay 0; the client keys handlers as (seq << 16) | cmdId.
+        byte[] packetBytes = new PacketCodec().Encode(packet.CmdId, packet.Body, Framing, packet.UncompressedBodySize, 0);
         try
         {
             await SendPacket(packetBytes);

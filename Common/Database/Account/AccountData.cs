@@ -60,6 +60,11 @@ public class AccountData : BaseDatabaseDataHelper
         return result;
     }
 
+    public static AccountData? GetFirstAccount()
+        => DatabaseHelper.GetAllInstance<AccountData>()?
+            .OrderBy(account => account.Uid)
+            .FirstOrDefault();
+
     #endregion
 
     #region Account
@@ -186,6 +191,13 @@ public class AccountData : BaseDatabaseDataHelper
         ComboToken = Crypto.CreateSessionKey(Uid.ToString());
         DatabaseHelper.UpdateInstance(this);
         return ComboToken;
+    }
+
+    public string EnsureComboToken()
+    {
+        if (!string.IsNullOrEmpty(ComboToken))
+            return ComboToken;
+        return GenerateComboToken();
     }
 
     #endregion

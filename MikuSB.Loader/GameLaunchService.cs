@@ -159,7 +159,7 @@ public static class GameLaunchService
         if (!value.Any(char.IsWhiteSpace) && !value.Contains('"'))
             return value;
 
-        return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        return "\"" + value.Replace("\"", "\\\"") + "\"";
     }
 
     [Flags]
@@ -304,7 +304,14 @@ public sealed class LaunchOptions
 
         var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (config.Loader.SetAllProxy && config.Proxy.Enabled)
+        {
             env["ALL_PROXY"] = $"socks5h://127.0.0.1:{config.Proxy.Port}";
+            env["all_proxy"] = $"socks5h://127.0.0.1:{config.Proxy.Port}";
+            env["HTTP_PROXY"] = "";
+            env["HTTPS_PROXY"] = "";
+            env["http_proxy"] = "";
+            env["https_proxy"] = "";
+        }
 
         if (string.IsNullOrWhiteSpace(gamePath))
             throw new InvalidOperationException("Loader.GamePath is not configured.");

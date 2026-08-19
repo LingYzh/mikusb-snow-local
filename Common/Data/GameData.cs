@@ -62,6 +62,12 @@ public static class GameData
     public static Dictionary<uint, DlcActivityExcel> DlcActivityData { get; private set; } = [];
     public static Dictionary<uint, BattlePassTimeExcel> BattlePassTimeData { get; private set; } = [];
     public static Dictionary<uint, IbGoodsExcel> IbGoodsData { get; private set; } = [];
+    public static Dictionary<uint, ShopGoodsExcel> ShopGoodsData { get; private set; } = [];
+    public static Dictionary<uint, List<ShopGoodsExcel>> ShopGoodsByShop { get; private set; } = [];
+    public static Dictionary<uint, ShopTabExcel> ShopTabData { get; private set; } = [];
+    public static Dictionary<uint, DropExcel> DropData { get; private set; } = [];
+    public static Dictionary<uint, DropGroupExcel> DropGroupData { get; private set; } = [];
+    public static Dictionary<uint, GiftExchangeExcel> GiftExchangeData { get; private set; } = [];
 }
 
 public static class GameResourceTemplateId

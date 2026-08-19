@@ -120,6 +120,7 @@ public class LoaderManager : MikuSB
 
     public static async Task InitSdkServer()
     {
+        OfficialIpLoopback.TryBind();
         SdkServer.SdkServer.Start([]);
         Logger.Info(I18NManager.Translate("Server.ServerInfo.ServerRunning", I18NManager.Translate("Word.Dispatch"),
             ConfigManager.Config.HttpServer.GetDisplayAddress()));

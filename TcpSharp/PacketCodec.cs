@@ -31,10 +31,11 @@ namespace MikuSB.TcpSharp
                 var lengthBuffer = new byte[HeaderSize4Byte];
                 if (!await ReadExactAsync(stream, lengthBuffer, cancellationToken))
                 {
-                    Logger.Debug("Connection closed before packet header");
+                    Logger.Info("Connection closed before packet header");
                     return null;
                 }
 
+                Logger.Info($"Packet header: {Convert.ToHexString(lengthBuffer)}");
                 var framing = DetectFraming(lengthBuffer);
 
                 switch (framing)
@@ -64,11 +65,11 @@ namespace MikuSB.TcpSharp
             }
         }
 
-        public byte[] Encode(ushort packetId, byte[] payload, PacketFraming framing = PacketFraming.FourByteLittleEndianLength, int uncompressedSize = 0)
+        public byte[] Encode(ushort packetId, byte[] payload, PacketFraming framing = PacketFraming.FourByteLittleEndianLength, int uncompressedSize = 0, ushort seqNo = 0)
         {
             return framing switch
             {
-                PacketFraming.TwoByteBigEndianLength => EncodeTwoByteFrame(packetId, payload, uncompressedSize),
+                PacketFraming.TwoByteBigEndianLength => EncodeTwoByteFrame(packetId, payload, uncompressedSize, seqNo),
                 PacketFraming.FourByteLittleEndianLength => EncodeFourByteFrame(packetId, payload),
                 _ => EncodeFourByteFrame(packetId, payload)
             };
@@ -112,11 +113,15 @@ namespace MikuSB.TcpSharp
                 return null;
             }
 
-            Logger.Debug("Control packet received");
+            Logger.Info($"Control packet received, extra={Convert.ToHexString(controlData.AsSpan(0, Math.Min(controlData.Length, 35)))}");
+            var body = new byte[HeaderSize4Byte + controlData.Length];
+            BinaryPrimitives.WriteUInt16BigEndian(body.AsSpan(0, 2), ClientMagic);
+            BinaryPrimitives.WriteUInt16LittleEndian(body.AsSpan(2, 2), 0);
+            controlData.CopyTo(body.AsSpan(HeaderSize4Byte));
             return new BasePacket(0)
             {
                 Framing = PacketFraming.Control,
-                Body = Array.Empty<byte>()
+                Body = body
             };
         }
 
@@ -135,6 +140,7 @@ namespace MikuSB.TcpSharp
             }
 
             var payloadLength = BinaryPrimitives.ReadUInt16LittleEndian(wrapper.AsSpan(6, 2));
+            Logger.Info($"Two-byte packet id={packetId} wrapper={Convert.ToHexString(wrapper)} payloadLen={payloadLength}");
             var payload = await ReadPayloadAsync(stream, payloadLength, cancellationToken);
 
             if (payload == null)
@@ -158,8 +164,12 @@ namespace MikuSB.TcpSharp
 
             if (length < 2 || length > MaxPacketLength)
             {
-                Logger.Warn($"Invalid packet length: {length}");
-                return null;
+                Logger.Warn($"Invalid 4-byte packet length {length}, header={Convert.ToHexString(header)}; keeping connection open");
+                return new BasePacket(0)
+                {
+                    Framing = PacketFraming.Unknown,
+                    Body = header
+                };
             }
 
             var frame = new byte[length];
@@ -231,11 +241,20 @@ namespace MikuSB.TcpSharp
             return ms.ToArray();
         }
 
-        private byte[] EncodeTwoByteFrame(ushort packetId, byte[] payload, int uncompressedSize = 0)
+        private byte[] EncodeTwoByteFrame(ushort packetId, byte[] payload, int uncompressedSize = 0, ushort seqNo = 0)
         {
             if (payload.Length > CompressionThreshold)
-                payload = ZlibCompress(payload);
-            var wrappedPayload = WrapPayload(payload);
+            {
+                var compressed = ZlibCompress(payload);
+                Logger.Info($"Compressed packet {packetId}: {payload.Length} -> {compressed.Length}");
+                payload = compressed;
+            }
+            if (payload.Length > ushort.MaxValue)
+                Logger.Error($"Packet {packetId} payload {payload.Length} exceeds uint16 wrapper length");
+            var wrappedPayload = WrapPayload(payload, seqNo);
+            Logger.Info(
+                $"Send 2-byte packet {packetId} payload={payload.Length} " +
+                $"wrapperHead={Convert.ToHexString(wrappedPayload.AsSpan(0, 12))}");
             var buffer = new byte[HeaderSize4Byte + wrappedPayload.Length];
 
             BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(0, 2), ClientMagic);
@@ -254,14 +273,18 @@ namespace MikuSB.TcpSharp
             return buffer;
         }
 
-        private byte[] WrapPayload(byte[] payload)
+        private byte[] WrapPayload(byte[] payload, ushort seqNo = 0)
         {
             const int wrapperHeaderSize = 35;
             var wrapped = new byte[wrapperHeaderSize + payload.Length];
+            // Client ReqLogin uses seq=0 and dispatches as (seq << 16) | cmdId.
+            // Writing 1,2,3... makes RspLogin look like PF 65538 (unsupported).
+            _ = seqNo;
             BinaryPrimitives.WriteUInt16LittleEndian(wrapped.AsSpan(6, 2), (ushort)payload.Length);
             if (payload.Length >= 2 && payload[0] == 0x78 &&
                 (payload[1] == 0x01 || payload[1] == 0x5E || payload[1] == 0x9C || payload[1] == 0xDA))
                 wrapped[10] = 2;
+            wrapped[11] = 1;
             payload.CopyTo(wrapped.AsSpan(wrapperHeaderSize));
 
             return wrapped;

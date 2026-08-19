@@ -14,8 +14,36 @@ public class RouteController : ControllerBase
 {
     public static ConfigContainer Config = ConfigManager.Config;
 
+    public static object BuildServerEntry(string type)
+    {
+        var name = Config.GameServer.GameServerName;
+        var host = Config.GameServer.PublicAddress;
+        var port = Config.GameServer.Port;
+        return new
+        {
+            type,
+            name,
+            title = name,
+            addr = host,
+            host,
+            ip = host,
+            port,
+            id = 1,
+            server_id = 1,
+            status = 1,
+            state = 1,
+            is_open = 1,
+            open = 1,
+            recommend = 1
+        };
+    }
+
+    public static object[] BuildServerQueryList()
+        => [BuildServerEntry("ASIA"), BuildServerEntry("1")];
+
     public static object BuildServerList(string version = "")
     {
+        var servers = BuildServerQueryList();
         return new
         {
             code = 0,
@@ -24,23 +52,23 @@ public class RouteController : ControllerBase
             message = "ok",
             version,
             server_time = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-            servers = new[]
+            is_open = true,
+            isOpen = true,
+            open = true,
+            servers,
+            server_list = servers,
+            list = servers,
+            data = new
             {
-                new
-                {
-                    id = 1,
-                    server_id = 1,
-                    name = Config.GameServer.GameServerName,
-                    title = Config.GameServer.GameServerName,
-                    host = Config.GameServer.PublicAddress,
-                    ip = Config.GameServer.PublicAddress,
-                    port = Config.GameServer.Port,
-                    status = 1,
-                    state = 1,
-                    is_open = true,
-                    open = true,
-                    recommend = true
-                }
+                is_open = true,
+                isOpen = true,
+                open = true,
+                servers,
+                server_list = servers,
+                list = servers,
+                host = Config.GameServer.PublicAddress,
+                ip = Config.GameServer.PublicAddress,
+                port = Config.GameServer.Port
             },
             game_server = new
             {
@@ -84,17 +112,19 @@ public class RouteController : ControllerBase
     {
         object rsp = new
         {
+            ret = 0,
             code = "0",
+            msg = "success",
             data = new
             {
                 agreementUpdateTime = "1728552600000",
                 appDownLoadUrl = "",
+                appName = "尘白禁区",
                 enableReportDataToDouyin = false,
                 loginType = new[] { "channel" },
                 openActivationCode = false,
                 qqGroup = (string?)null
-            },
-            msg = "success"
+            }
         };
 
         return Ok(rsp);
@@ -112,7 +142,7 @@ public class RouteController : ControllerBase
                 platformPrivacyAgreement = "https://www.amazingseasun.com/privacy.html?lang=zh-Hant&gamecode=200001086",
                 payType = new[] { "mycard" },
                 loginType = new[] { "mail", "google", "twitter", "guest", "steam" },
-                closeGeetest = false,
+                closeGeetest = true,
                 userAgreement = "https://www.amazingseasun.com/user.html?lang=zh-Hant&gamecode=111111680",
                 privacyAgreement = "https://www.amazingseasun.com/privacy.html?lang=zh-Hant&gamecode=111111680",
                 initPrivacyUpdateTime = 0,
@@ -227,10 +257,21 @@ public class RouteController : ControllerBase
         var finalToken = token ?? form_token ?? await GetJsonBodyValue("token");
         var account = ResolveAccountForSdkLogin(null, finalUid, finalToken);
         if (account == null)
+        {
+            var fallbackName = !string.IsNullOrEmpty(finalUid) ? $"guest_{finalUid}" : "guest";
+            account = AccountData.GetAccountByUserName(fallbackName);
+            if (account == null && ConfigManager.Config.ServerOption.AutoCreateUser)
+            {
+                AccountData.CreateAccount(fallbackName, 0, "123456");
+                account = AccountData.GetAccountByUserName(fallbackName);
+            }
+        }
+
+        if (account == null)
             return BuildLoginFailedResponse("Account not found.");
 
         var responseUid = account.Uid.ToString();
-        var responseToken = account.GenerateComboToken();
+        var responseToken = account.EnsureComboToken();
 
         object rsp = new
         {
@@ -262,58 +303,74 @@ public class RouteController : ControllerBase
         [FromQuery] string? uid,
         [FromQuery] string? token,
         [FromQuery] string? email,
+        [FromQuery] string? account,
         [FromForm] string? form_uid,
         [FromForm] string? form_token,
-        [FromForm] string? form_email
+        [FromForm] string? form_email,
+        [FromForm] string? form_account
     )
     {
-        var finalEmail = email ?? form_email ?? await GetJsonBodyValue("email");
+        var finalEmail = email ?? form_email ?? account ?? form_account ?? await GetJsonBodyValue("email") ?? await GetJsonBodyValue("account");
         if (!string.IsNullOrWhiteSpace(finalEmail))
         {
             var normalizedEmail = finalEmail.Trim();
-            var accountData = AccountData.GetAccountByEmail(normalizedEmail);
+            var accountData = AccountData.GetAccountByEmail(normalizedEmail) ?? AccountData.GetAccountByUserName(normalizedEmail);
             if (accountData == null)
             {
                 if (!ConfigManager.Config.ServerOption.AutoCreateUser) return BuildLoginFailedResponse("Account not found.");
                 AccountData.CreateAccount(normalizedEmail, 0, "123456");
-                accountData = AccountData.GetAccountByEmail(normalizedEmail)!;
+                accountData = AccountData.GetAccountByEmail(normalizedEmail) ?? AccountData.GetAccountByUserName(normalizedEmail);
             }
 
-            var finalUidValue = accountData.Uid.ToString();
-            var finalTokenValue = accountData.GenerateComboToken();
-
-            object emailLoginRsp = new
+            if (accountData != null)
             {
-                code = 0,
-                data = new
-                {
-                    associatedAccounts = Array.Empty<string>(),
-                    isFirstLogin = false,
-                    isNeedKoreaSciAuth = false,
-                    ksOpenId = $"ks_{finalUidValue}",
-                    nickname = accountData.Username,
-                    passportId = finalUidValue,
-                    playerFillAgeUrl = "",
-                    status = 0,
-                    thirdPartyUid = "",
-                    token = finalTokenValue,
-                    type = "guest",
-                    uid = accountData.Uid
-                },
-                msg = "操作成功"
-            };
+                var finalUidValue = accountData.Uid.ToString();
+                var finalTokenValue = accountData.EnsureComboToken();
 
-            return Ok(emailLoginRsp);
+                object emailLoginRsp = new
+                {
+                    code = 0,
+                    data = new
+                    {
+                        associatedAccounts = Array.Empty<string>(),
+                        isFirstLogin = false,
+                        isNeedKoreaSciAuth = false,
+                        ksOpenId = $"ks_{finalUidValue}",
+                        nickname = accountData.Username,
+                        passportId = finalUidValue,
+                        playerFillAgeUrl = "",
+                        status = 0,
+                        thirdPartyUid = "",
+                        token = finalTokenValue,
+                        type = "guest",
+                        uid = accountData.Uid
+                    },
+                    msg = "操作成功"
+                };
+
+                return Ok(emailLoginRsp);
+            }
         }
 
         var finalUid = uid ?? form_uid ?? await GetJsonBodyValue("uid");
         var finalToken = token ?? form_token ?? await GetJsonBodyValue("token");
-        var account = ResolveAccountForSdkLogin(finalEmail, finalUid, finalToken);
-        if (account == null)
+        var resolvedAccount = ResolveAccountForSdkLogin(finalEmail, finalUid, finalToken);
+        if (resolvedAccount == null)
+        {
+            var fallbackName = !string.IsNullOrEmpty(finalUid) ? $"guest_{finalUid}" : "guest";
+            resolvedAccount = AccountData.GetAccountByUserName(fallbackName);
+            if (resolvedAccount == null && ConfigManager.Config.ServerOption.AutoCreateUser)
+            {
+                AccountData.CreateAccount(fallbackName, 0, "123456");
+                resolvedAccount = AccountData.GetAccountByUserName(fallbackName);
+            }
+        }
+
+        if (resolvedAccount == null)
             return BuildLoginFailedResponse("Account not found.");
 
-        var responseUid = account.Uid.ToString();
-        var responseToken = account.GenerateComboToken();
+        var responseUid = resolvedAccount.Uid.ToString();
+        var responseToken = resolvedAccount.EnsureComboToken();
 
         object rsp = new
         {
@@ -324,14 +381,14 @@ public class RouteController : ControllerBase
                 isFirstLogin = false,
                 isNeedKoreaSciAuth = false,
                 ksOpenId = $"ks_{responseUid}",
-                nickname = account.Username,
+                nickname = resolvedAccount.Username,
                 passportId = responseUid,
                 playerFillAgeUrl = "",
                 status = 0,
                 thirdPartyUid = "",
                 token = responseToken,
                 type = "guest",
-                uid = account.Uid
+                uid = resolvedAccount.Uid
             },
             msg = "操作成功"
         };
@@ -358,11 +415,13 @@ public class RouteController : ControllerBase
             data = new
             {
                 bindAccountTypes = new[] { "google" },
-                channelUid = uidString,
-                loginAccountType = "google",
-                nickName = account.Username,
+                isNeedKoreaSciAuth = false,
+                nickname = account.Username,
                 passportId = uidString,
-                uid = $"seasun__{uidString}"
+                playerFillAgeUrl = "",
+                status = 0,
+                thirdPartyUid = "",
+                uid = account.Uid
             },
             msg = "操作成功"
         };
@@ -376,36 +435,29 @@ public class RouteController : ControllerBase
         object rsp = new
         {
             code = 0,
-            ret = 0,
-            msg = "ok",
-            message = "ok"
+            data = (object?)null,
+            msg = "操作成功"
         };
 
         return Ok(rsp);
     }
 
     [HttpGet("/query")]
+    [HttpPost("/query")]
     public IActionResult GetQuery([FromQuery] string? version, [FromQuery] string? platform)
     {
-        var servers = new[]
+        try
         {
-            new
-            {
-                id = 1,
-                server_id = 1,
-                name = Config.GameServer.GameServerName,
-                title = Config.GameServer.GameServerName,
-                host = Config.GameServer.PublicAddress,
-                ip = Config.GameServer.PublicAddress,
-                port = Config.GameServer.Port,
-                status = 1,
-                state = 1,
-                is_open = true,
-                open = true,
-                recommend = true
-            }
-        };
-        return Ok(servers);
+            var list = BuildServerQueryList();
+            var json = JsonSerializer.Serialize(list);
+            Logger.GetByClassName().Info($"GET /query version={version} platform={platform} body={json}");
+            return Content(json, "application/json");
+        }
+        catch (Exception ex)
+        {
+            Logger.GetByClassName().Error($"GET /query failed: {ex}");
+            return Content("[]", "application/json");
+        }
     }
 
     [HttpGet("/query_version={version}")]
@@ -415,25 +467,33 @@ public class RouteController : ControllerBase
     }
 
     [HttpGet("/query_version")]
-    public IActionResult GetQueryVersionV2([FromQuery] string version)
+    [HttpPost("/query_version")]
+    public IActionResult GetQueryVersionV2([FromQuery] string? version)
     {
-        return Ok(BuildServerList(version));
+        return Ok(BuildServerList(version ?? ""));
     }
 
     [HttpGet("/api/serverlist")]
+    [HttpPost("/api/serverlist")]
     public IActionResult GetServerList()
     {
         return Ok(BuildServerList());
     }
 
     [HttpGet("/account/query-uid/{appId}")]
-    public IActionResult QueryUid(string appId, [FromQuery] string authInfo)
+    [HttpPost("/account/query-uid/{appId}")]
+    public async Task<IActionResult> QueryUid(
+        string appId,
+        [FromQuery] string? authInfo,
+        [FromQuery] string? uid,
+        [FromForm] string? form_authInfo,
+        [FromForm] string? form_uid
+    )
     {
-        var account = ResolveAccountByUid(ExtractUid(authInfo));
-        if (account == null)
-            return BuildNotFoundResponse("Account not found.");
-
-        var uid = account.Uid.ToString();
+        var finalAuthInfo = authInfo ?? form_authInfo ?? await GetJsonBodyValue("authInfo");
+        var finalUid = uid ?? form_uid ?? ExtractUid(finalAuthInfo) ?? await GetJsonBodyValue("uid");
+        var account = ResolveAccountByUid(finalUid);
+        var resUid = account != null ? account.Uid.ToString() : (!string.IsNullOrWhiteSpace(finalUid) ? finalUid : "10001");
 
         object rsp = new
         {
@@ -441,11 +501,509 @@ public class RouteController : ControllerBase
             msg = "success",
             data = new
             {
-                uid = $"seasun__{uid}"
+                uid = $"jinshan__{resUid}",
+                historyPlatform = new[] { "PC" }
             }
         };
 
         return Ok(rsp);
+    }
+
+    [HttpGet("/v6/config/{appId}")]
+    [HttpPost("/v6/config/{appId}")]
+    public IActionResult GetV6Config(string appId)
+    {
+        var cfgObj = new
+        {
+            loginType = new[] { "channel" },
+            canTouristPay = false,
+            certification = "2"
+        };
+        object rsp = new
+        {
+            code = 1,
+            msg = "操作成功",
+            responseSuccess = true,
+            data = cfgObj,
+            config = cfgObj
+        };
+        return Ok(rsp);
+    }
+
+    [HttpGet("/v6/loginCaptcha/{appId}")]
+    [HttpPost("/v6/loginCaptcha/{appId}")]
+    public IActionResult LoginCaptchaV6(string appId)
+    {
+        object rsp = new
+        {
+            code = 1,
+            msg = "操作成功",
+            responseSuccess = true,
+            fuzzyMobile = "199****1164",
+            fuzzyMobileList = Array.Empty<string>(),
+            needCaptcha = false
+        };
+        return Ok(rsp);
+    }
+
+    [HttpGet("/v6/sendSms/{appId}")]
+    [HttpPost("/v6/sendSms/{appId}")]
+    [HttpGet("/v6/sendCode/{appId}")]
+    [HttpPost("/v6/sendCode/{appId}")]
+    [HttpGet("/v6/smsCode/{appId}")]
+    [HttpPost("/v6/smsCode/{appId}")]
+    [HttpGet("/v6/sendSmsCode/{appId}")]
+    [HttpPost("/v6/sendSmsCode/{appId}")]
+    [HttpGet("/v6/mobileCode/{appId}")]
+    [HttpPost("/v6/mobileCode/{appId}")]
+    [HttpGet("/v6/sendMobileCode/{appId}")]
+    [HttpPost("/v6/sendMobileCode/{appId}")]
+    public IActionResult SendMobileCodeV6(string appId)
+    {
+        return Ok(new { code = 1, msg = "验证码已发送", responseSuccess = true, leftSeconds = 60 });
+    }
+
+    [HttpGet("/v6/loginBySms/{appId}")]
+    [HttpPost("/v6/loginBySms/{appId}")]
+    public async Task<IActionResult> LoginBySmsV6(
+        string appId,
+        [FromQuery] string? mobile,
+        [FromQuery] string? phone,
+        [FromQuery] string? account,
+        [FromQuery] string? code,
+        [FromQuery] string? smsCode,
+        [FromForm] string? form_mobile,
+        [FromForm] string? form_phone,
+        [FromForm] string? form_account
+    )
+    {
+        var inputAccount = mobile 
+            ?? form_mobile
+            ?? await GetJsonBodyValue("mobile") 
+            ?? phone 
+            ?? form_phone
+            ?? await GetJsonBodyValue("phone") 
+            ?? account 
+            ?? form_account
+            ?? await GetJsonBodyValue("account") 
+            ?? "13800000000";
+
+        var accountData = AccountData.GetAccountByUserName(inputAccount);
+        if (accountData == null)
+        {
+            if (ConfigManager.Config.ServerOption.AutoCreateUser)
+            {
+                AccountData.CreateAccount(inputAccount, 0, "123456");
+                accountData = AccountData.GetAccountByUserName(inputAccount);
+            }
+        }
+
+        if (accountData == null)
+        {
+            return Ok(new { code = 0, msg = "账号创建失败", responseSuccess = false });
+        }
+
+        var uidStr = accountData.Uid.ToString();
+        var tokenStr = accountData.EnsureComboToken();
+
+        object rsp = new
+        {
+            code = 1,
+            msg = "操作成功",
+            expId = accountData.Uid,
+            passportId = uidStr,
+            uid = uidStr,
+            token = tokenStr,
+            hasBindedPhone = true,
+            hasBindedEmail = true,
+            accountType = 0,
+            needVerifyIdCard = false,
+            forcedVerifyIdCard = false,
+            canTouristPay = false,
+            certification = "2",
+            fuzzyMobile = inputAccount.Length >= 7 ? $"{inputAccount[..3]}****{inputAccount[^4..]}" : "199****1164",
+            needUpPsw = false,
+            upPswMsg = (string?)null,
+            faceDetectUrl = (string?)null,
+            leftSeconds = "-1",
+            idNumber = "410101199001011234",
+            fuzzyPassportId = uidStr,
+            newAccount = false,
+            responseSuccess = true
+        };
+
+        return Ok(rsp);
+    }
+
+    [HttpGet("/v6/verifyMobileCode/{appId}")]
+    [HttpPost("/v6/verifyMobileCode/{appId}")]
+    public IActionResult VerifyMobileCodeV6(string appId)
+    {
+        return Ok(new { code = 1, msg = "操作成功", responseSuccess = true });
+    }
+
+    [HttpGet("/v6/verifyIdCard/{appId}")]
+    [HttpPost("/v6/verifyIdCard/{appId}")]
+    [HttpGet("/v6/idCard/{appId}")]
+    [HttpPost("/v6/idCard/{appId}")]
+    public IActionResult VerifyIdCardV6(string appId)
+    {
+        return Ok(new { code = 1, msg = "操作成功", certification = "2", responseSuccess = true });
+    }
+
+    [HttpGet("/privacy/gttest/gttest.html")]
+    public IActionResult PrivacyGeetestHtml()
+    {
+        var html = @"<!DOCTYPE html><html><head><meta charset='utf-8'></head><body>
+<script>
+    try {
+        var res = {
+            lot_number: 'local',
+            captcha_output: 'local',
+            pass_token: 'local',
+            gen_time: '1787069167',
+            captcha_id: '720b159c165092060616c174e37e0c4e'
+        };
+        if (window.cefQuery) {
+            window.cefQuery({
+                request: JSON.stringify({ key: 'xg_browser_geetest_result', code: '0', data: { result_str: JSON.stringify(res) } }),
+                onSuccess: function() {},
+                onFailure: function() {}
+            });
+        }
+        window.close();
+    } catch(e) {}
+</script>
+</body></html>";
+        return Content(html, "text/html", Encoding.UTF8);
+    }
+
+    [HttpGet("/v6/login/{appId}")]
+    [HttpPost("/v6/login/{appId}")]
+    public async Task<IActionResult> LoginV6(
+        string appId,
+        [FromQuery] string? uid,
+        [FromQuery] string? token,
+        [FromQuery] string? account,
+        [FromQuery] string? password,
+        [FromQuery] string? username,
+        [FromQuery] string? mobile,
+        [FromQuery] string? phone,
+        [FromForm] string? form_uid,
+        [FromForm] string? form_token,
+        [FromForm] string? form_account,
+        [FromForm] string? form_password,
+        [FromForm] string? form_username,
+        [FromForm] string? form_mobile,
+        [FromForm] string? form_phone
+    )
+    {
+        var inputAccount = account 
+            ?? form_account 
+            ?? await GetJsonBodyValue("account")
+            ?? username
+            ?? form_username
+            ?? await GetJsonBodyValue("username")
+            ?? mobile
+            ?? form_mobile
+            ?? await GetJsonBodyValue("mobile")
+            ?? phone
+            ?? form_phone
+            ?? await GetJsonBodyValue("phone")
+            ?? uid 
+            ?? form_uid 
+            ?? await GetJsonBodyValue("uid") 
+            ?? "player";
+
+        var inputPassword = password ?? form_password ?? await GetJsonBodyValue("password") ?? "123456";
+
+        var accountData = AccountData.GetAccountByUserName(inputAccount);
+        if (accountData == null)
+        {
+            if (ConfigManager.Config.ServerOption.AutoCreateUser)
+            {
+                AccountData.CreateAccount(inputAccount, 0, inputPassword);
+                accountData = AccountData.GetAccountByUserName(inputAccount);
+            }
+        }
+
+        if (accountData == null)
+        {
+            return Ok(new { code = 0, msg = "账号创建失败", responseSuccess = false });
+        }
+
+        var uidStr = accountData.Uid.ToString();
+        var tokenStr = accountData.EnsureComboToken();
+
+        object rsp = new
+        {
+            code = 1,
+            msg = "操作成功",
+            expId = accountData.Uid,
+            passportId = uidStr,
+            uid = uidStr,
+            token = tokenStr,
+            hasBindedPhone = true,
+            hasBindedEmail = true,
+            accountType = 0,
+            needVerifyIdCard = false,
+            forcedVerifyIdCard = false,
+            canTouristPay = false,
+            certification = "2",
+            fuzzyMobile = inputAccount.Length >= 7 ? $"{inputAccount[..3]}****{inputAccount[^4..]}" : "199****1164",
+            needUpPsw = false,
+            upPswMsg = (string?)null,
+            faceDetectUrl = (string?)null,
+            leftSeconds = "-1",
+            idNumber = "410101199001011234",
+            fuzzyPassportId = uidStr,
+            newAccount = false,
+            responseSuccess = true
+        };
+
+        return Ok(rsp);
+    }
+
+    [HttpGet("/v6/loginByToken/{appId}")]
+    [HttpPost("/v6/loginByToken/{appId}")]
+    [HttpGet("/v6/quickLogin/{appId}")]
+    [HttpPost("/v6/quickLogin/{appId}")]
+    [HttpGet("/v6/autoLogin/{appId}")]
+    [HttpPost("/v6/autoLogin/{appId}")]
+    public async Task<IActionResult> LoginByTokenV6(
+        string appId,
+        [FromQuery] string? uid,
+        [FromQuery] string? token,
+        [FromForm] string? form_uid,
+        [FromForm] string? form_token
+    )
+    {
+        var finalUid = uid ?? form_uid ?? await GetJsonBodyValue("uid");
+        var finalToken = token ?? form_token ?? await GetJsonBodyValue("token");
+        var account = ResolveAccountForSdkLogin(null, finalUid, finalToken);
+        if (account == null && !string.IsNullOrEmpty(finalUid))
+        {
+            account = ResolveAccountByUid(finalUid);
+        }
+
+        if (account == null)
+        {
+            var fallbackName = !string.IsNullOrEmpty(finalUid) ? $"player_{finalUid}" : "player";
+            account = AccountData.GetAccountByUserName(fallbackName);
+            if (account == null && ConfigManager.Config.ServerOption.AutoCreateUser)
+            {
+                AccountData.CreateAccount(fallbackName, 0, "123456");
+                account = AccountData.GetAccountByUserName(fallbackName);
+            }
+        }
+
+        if (account == null)
+        {
+            return Ok(new { code = 718, msg = "请重新登录", responseSuccess = false });
+        }
+
+        var uidStr = account.Uid.ToString();
+        var tokenStr = account.EnsureComboToken();
+
+        object rsp = new
+        {
+            code = 1,
+            msg = "操作成功",
+            expId = account.Uid,
+            passportId = uidStr,
+            uid = uidStr,
+            token = tokenStr,
+            hasBindedPhone = true,
+            hasBindedEmail = true,
+            accountType = 0,
+            needVerifyIdCard = false,
+            forcedVerifyIdCard = false,
+            canTouristPay = false,
+            certification = "2",
+            fuzzyMobile = "199****1164",
+            needUpPsw = false,
+            upPswMsg = (string?)null,
+            faceDetectUrl = (string?)null,
+            leftSeconds = "-1",
+            idNumber = "410101199001011234",
+            fuzzyPassportId = uidStr,
+            newAccount = false,
+            responseSuccess = true
+        };
+
+        return Ok(rsp);
+    }
+
+    [HttpGet("/account/qrcode/gen")]
+    [HttpPost("/account/qrcode/gen")]
+    [HttpGet("/v6/account/qrcode/gen")]
+    [HttpPost("/v6/account/qrcode/gen")]
+    [HttpGet("/qrcode/gen")]
+    [HttpPost("/qrcode/gen")]
+    public IActionResult GetQrCodeGen([FromQuery] string? appId)
+    {
+        var qrId = Guid.NewGuid().ToString("N");
+        object rsp = new
+        {
+            code = "0",
+            msg = "success",
+            data = new
+            {
+                qrcode = qrId,
+                type = "login",
+                expireTime = 600,
+                downloadUrl = ""
+            }
+        };
+        return Ok(rsp);
+    }
+
+    [HttpGet("/account/qrcode/refresh")]
+    [HttpPost("/account/qrcode/refresh")]
+    [HttpGet("/v6/account/qrcode/refresh")]
+    [HttpPost("/v6/account/qrcode/refresh")]
+    [HttpGet("/qrcode/refresh")]
+    [HttpPost("/qrcode/refresh")]
+    public IActionResult GetQrCodeRefresh([FromQuery] string? appId)
+    {
+        var qrId = Guid.NewGuid().ToString("N");
+        object rsp = new
+        {
+            code = "0",
+            msg = "success",
+            data = new
+            {
+                qrcode = qrId,
+                type = "login",
+                expireTime = 600,
+                downloadUrl = ""
+            }
+        };
+        return Ok(rsp);
+    }
+
+    [HttpGet("/account/qrcode/status")]
+    [HttpPost("/account/qrcode/status")]
+    [HttpGet("/v6/account/qrcode/status")]
+    [HttpPost("/v6/account/qrcode/status")]
+    [HttpGet("/qrcode/status")]
+    [HttpPost("/qrcode/status")]
+    [HttpGet("/pay/qrcode/status")]
+    [HttpPost("/pay/qrcode/status")]
+    public IActionResult GetQrCodeStatus([FromQuery] string? qrcode, [FromQuery] string? appId)
+    {
+        var accountData = AccountData.GetAccountByUserName("player") ?? AccountData.GetAccountByUid(10001);
+        if (accountData == null && ConfigManager.Config.ServerOption.AutoCreateUser)
+        {
+            AccountData.CreateAccount("player", 0, "123456");
+            accountData = AccountData.GetAccountByUserName("player");
+        }
+
+        var tokenStr = accountData?.EnsureComboToken() ?? "local_offline_token";
+
+        object rsp = new
+        {
+            code = "0",
+            msg = "success",
+            data = new
+            {
+                status = 2,
+                statusMsg = "成功",
+                qrToken = tokenStr,
+                token = tokenStr,
+                uid = accountData?.Uid ?? 10001,
+                passportId = accountData?.Uid.ToString() ?? "10001",
+                leftSeconds = (int?)null,
+                antiAddictionExpiredTime = (string?)null
+            }
+        };
+        return Ok(rsp);
+    }
+
+    [HttpGet("/account/qrcode/loginByToken")]
+    [HttpPost("/account/qrcode/loginByToken")]
+    [HttpGet("/v6/account/qrcode/loginByToken")]
+    [HttpPost("/v6/account/qrcode/loginByToken")]
+    [HttpGet("/qrcode/loginByToken")]
+    [HttpPost("/qrcode/loginByToken")]
+    public async Task<IActionResult> LoginByQrToken(
+        [FromQuery] string? appId,
+        [FromQuery] string? qrToken,
+        [FromQuery] string? token,
+        [FromForm] string? form_qrToken,
+        [FromForm] string? form_token
+    )
+    {
+        var finalToken = qrToken ?? form_qrToken ?? token ?? form_token ?? await GetJsonBodyValue("qrToken") ?? await GetJsonBodyValue("token");
+        var accountData = AccountData.GetAccountByComboToken(finalToken ?? "")
+            ?? AccountData.GetAccountByUserName("player")
+            ?? AccountData.GetAccountByUid(10001);
+
+        if (accountData == null && ConfigManager.Config.ServerOption.AutoCreateUser)
+        {
+            AccountData.CreateAccount("player", 0, "123456");
+            accountData = AccountData.GetAccountByUserName("player");
+        }
+
+        if (accountData == null)
+            return BuildLoginFailedResponse("Account not found.");
+
+        var uidStr = accountData.Uid.ToString();
+        var tokenStr = accountData.EnsureComboToken();
+
+        object rsp = new
+        {
+            code = 1,
+            msg = "操作成功",
+            expId = accountData.Uid,
+            passportId = uidStr,
+            uid = uidStr,
+            token = tokenStr,
+            hasBindedPhone = true,
+            hasBindedEmail = true,
+            accountType = 0,
+            needVerifyIdCard = false,
+            forcedVerifyIdCard = false,
+            canTouristPay = false,
+            certification = "2",
+            fuzzyMobile = "199****1164",
+            needUpPsw = false,
+            upPswMsg = (string?)null,
+            faceDetectUrl = (string?)null,
+            leftSeconds = "-1",
+            idNumber = "410101199001011234",
+            fuzzyPassportId = uidStr,
+            newAccount = false,
+            responseSuccess = true
+        };
+        return Ok(rsp);
+    }
+
+    [HttpGet("/qrcode/invalid")]
+    [HttpPost("/qrcode/invalid")]
+    [HttpGet("/account/qrcode/invalid")]
+    [HttpPost("/account/qrcode/invalid")]
+    public IActionResult GetQrCodeInvalid()
+    {
+        return Ok(new { code = "0", msg = "success", data = (object?)null });
+    }
+
+    [HttpGet("/v6/gameLoginLogout/{appId}")]
+    [HttpPost("/v6/gameLoginLogout/{appId}")]
+    public IActionResult GameLoginLogoutV6(string appId)
+    {
+        return Ok(new { code = 1, msg = "操作成功", responseSuccess = true });
+    }
+
+    [HttpGet("/data/report")]
+    [HttpPost("/data/report")]
+    [HttpGet("/data/report/v3")]
+    [HttpPost("/data/report/v3")]
+    [HttpGet("/data/report/{version}")]
+    [HttpPost("/data/report/{version}")]
+    public IActionResult DataReport()
+    {
+        return Ok(new { code = "0", msg = "success" });
     }
 
     [HttpGet("/health")]

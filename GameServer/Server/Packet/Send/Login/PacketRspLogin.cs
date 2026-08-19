@@ -23,9 +23,12 @@ public class PacketRspLogin : BasePacket
 
         var proto = new RspLogin
         {
+            SessionId = player.Connection?.SessionId ?? Guid.NewGuid().ToString("N"),
             Timestamp = (uint)Extensions.GetUnixSec(),
             WorldChannel = 1,
             AreaId = 1,
+            TimeZone = 8,
+            Certification = 2,
             Data = player.ToPlayerProto(includeSupportCards),
             NeedRename = false
         };

@@ -61,17 +61,18 @@ public class Connection(Socket socket, IPEndPoint remote) : SocketConnection(soc
                     case PacketFraming.FourByteLittleEndianLength:
                     case PacketFraming.TwoByteBigEndianLength:
                         Framing = decodedPacket.Framing;
-                        LogPacket("Recv", decodedPacket.CmdId, decodedPacket.Body.ToArray(),Framing);
+                        Logger.Info($"Recv {LogMap.GetValueOrDefault(decodedPacket.CmdId, "Unknown")}({decodedPacket.CmdId}) framing={Framing} size={decodedPacket.Body.Length}");
+                        LogPacket("Recv", decodedPacket.CmdId, decodedPacket.Body.ToArray(), Framing);
                         await HandlePacket(decodedPacket.CmdId, decodedPacket.Body.ToArray());
                         break;
 
                     case PacketFraming.Control:
-                        Logger.Info("Control packet received");
-                        // Handle control packet if needed
+                        Framing = PacketFraming.TwoByteBigEndianLength;
+                        Logger.Info($"Control/handshake packet received, {decodedPacket.Body.Length} bytes");
                         break;
 
                     case PacketFraming.Unknown:
-                        Logger.Warn("Unknown packet format received");
+                        Logger.Warn($"Unknown packet format received, {decodedPacket.Body.Length} bytes: {Convert.ToHexString(decodedPacket.Body.AsSpan(0, Math.Min(64, decodedPacket.Body.Length)))}");
                         break;
                 }
             }

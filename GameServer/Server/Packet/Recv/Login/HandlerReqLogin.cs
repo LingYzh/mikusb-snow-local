@@ -23,7 +23,12 @@ public class HandlerReqLogin : Handler
     private static readonly Logger Logger = new("ReqLogin");
     private const int SupportCardLoginSplitThreshold = 2000;
 
-    private static string? ExtractSdkAuthToken(string? token)
+    private static readonly string[] TokenJsonKeys =
+    [
+        "authToken", "token", "Token", "session", "sessionId", "comboToken", "dispatchToken"
+    ];
+
+    private static string? ExtractJsonField(string? token, params string[] keys)
     {
         if (string.IsNullOrWhiteSpace(token))
             return null;
@@ -37,37 +42,83 @@ public class HandlerReqLogin : Handler
 
             var json = Encoding.UTF8.GetString(Convert.FromBase64String(normalized));
             using var document = JsonDocument.Parse(json);
-            return document.RootElement.TryGetProperty("authToken", out var authToken)
-                ? authToken.GetString()
-                : null;
+            foreach (var key in keys)
+            {
+                if (document.RootElement.TryGetProperty(key, out var value))
+                {
+                    if (value.ValueKind == JsonValueKind.String)
+                        return value.GetString();
+                    if (value.ValueKind is JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False)
+                        return value.ToString();
+                }
+            }
         }
         catch
         {
-            return null;
         }
+
+        return null;
+    }
+
+    private static string? ExtractSdkAuthToken(string? token)
+        => ExtractJsonField(token, TokenJsonKeys);
+
+    private static AccountData? ResolveLoginAccount(ReqLogin req, string? sdkAuthToken)
+    {
+        var wrappedUid = ExtractJsonField(req.Token, "uid", "Uid", "passportId", "pid");
+        return AccountData.GetAccountByComboToken(req.Token)
+               ?? AccountData.GetAccountByDispatchToken(req.Token)
+               ?? AccountData.GetAccountByComboToken(sdkAuthToken ?? "")
+               ?? AccountData.GetAccountByDispatchToken(sdkAuthToken ?? "")
+               ?? AccountData.GetAccountByUserName(req.Token)
+               ?? AccountData.GetAccountByUserName(req.Provider)
+               ?? (int.TryParse(wrappedUid, out var wrappedUidValue) ? AccountData.GetAccountByUid(wrappedUidValue) : null)
+               ?? AccountData.GetAccountByUid(10001)
+               ?? AccountData.GetAccountByUserName("player")
+               ?? AccountData.GetFirstAccount();
     }
 
     public override async Task OnHandle(Connection connection, byte[] data, ushort seqNo)
     {
         var req = ReqLogin.Parser.ParseFrom(data);
         var sdkAuthToken = ExtractSdkAuthToken(req.Token);
-        var account = AccountData.GetAccountByComboToken(req.Token)
-                      ?? AccountData.GetAccountByDispatchToken(req.Token)
-                      ?? AccountData.GetAccountByComboToken(sdkAuthToken ?? "")
-                      ?? AccountData.GetAccountByDispatchToken(sdkAuthToken ?? "");
+        Logger.Info($"ReqLogin provider={req.Provider}, tokenLen={req.Token?.Length ?? 0}, authToken={sdkAuthToken ?? "<none>"}");
+
+        var account = ResolveLoginAccount(req, sdkAuthToken);
+        if (account == null && ConfigManager.Config.ServerOption.AutoCreateUser)
+        {
+            var fallbackName = string.IsNullOrWhiteSpace(req.Provider) ? "player" : req.Provider;
+            if (AccountData.GetAccountByUserName(fallbackName) == null)
+                AccountData.CreateAccount(fallbackName, 0, "123456");
+            account = AccountData.GetAccountByUserName(fallbackName)
+                      ?? AccountData.GetAccountByUserName("player")
+                      ?? AccountData.GetFirstAccount();
+        }
+
         if (account == null)
         {
             Logger.Warn($"Rejected login: provider={req.Provider}, token={req.Token}, authToken={sdkAuthToken}");
             await connection.SendPacket(CmdIds.NtfLogout);
             return;
         }
+
+        connection.SessionId = Guid.NewGuid().ToString("N");
+        Logger.Info($"Player ReqLogin authenticated: Uid={account.Uid}, Username={account.Username}, session={connection.SessionId}");
         if (!ResourceManager.IsLoaded)
-            // resource manager not loaded, return
-            return;
-        var prev = Listener.GetActiveConnection(account.Uid);
-        if (prev != null)
         {
-            await connection.SendPacket(CmdIds.NtfLogout);
+            Logger.Warn("Resource manager is not loaded yet, delaying login is not supported; returning without RspLogin");
+            return;
+        }
+        var prev = Listener.GetActiveConnection(account.Uid);
+        if (prev != null && !ReferenceEquals(prev, connection))
+        {
+            try
+            {
+                await prev.SendPacket(CmdIds.NtfLogout);
+            }
+            catch
+            {
+            }
             prev.Stop();
         }
 
@@ -83,6 +134,7 @@ public class HandlerReqLogin : Handler
         connection.Player.Connection = connection;
         var splitSupportCards = connection.Player.InventoryManager.InventoryData.SupportCards.Count > SupportCardLoginSplitThreshold;
         await connection.SendPacket(new PacketRspLogin(connection.Player!, !splitSupportCards));
+        connection.State = SessionStateEnum.ACTIVE;
         if (splitSupportCards)
             await SendSupportCardsOnLogin(connection);
         await connection.SendPacket(new PacketNtfCallScript(connection.Player!));

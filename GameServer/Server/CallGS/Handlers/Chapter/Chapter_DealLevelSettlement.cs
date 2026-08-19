@@ -15,80 +15,70 @@ public class Chapter_DealLevelSettlement : ICallGSHandler
     public async Task Handle(Connection connection, string param, ushort seqNo)
     {
         var req = JsonSerializer.Deserialize<DealLevelSettlementParam>(param);
-        NtfSyncPlayer? extraSync = null;
+        var (payload, extraSync) = await BuildSettlementPayload(connection, req?.SCmd, req?.TbParam);
         var response = new JsonObject
         {
             ["sCmd"] = req?.SCmd ?? "Chapter_LevelSettlement",
-            ["tbParam"] = BuildSettlementPayload(connection, req?.SCmd, req?.TbParam, out extraSync)
+            ["tbParam"] = payload
         };
 
         await CallGSRouter.SendScript(connection, "Chapter_DealLevelSettlement", response.ToJsonString(), extraSync!);
     }
 
-    private static JsonNode BuildSettlementPayload(Connection connection, string? sCmd, JsonNode? tbParam, out NtfSyncPlayer? extraSync)
+    private static async Task<(JsonNode Payload, NtfSyncPlayer? ExtraSync)> BuildSettlementPayload(
+        Connection connection, string? sCmd, JsonNode? tbParam)
     {
-        extraSync = null;
-
-        if (string.Equals(sCmd, "Chapter_LevelSettlement", StringComparison.Ordinal))
+        if (string.Equals(sCmd, "Chapter_LevelSettlement", StringComparison.Ordinal) ||
+            string.Equals(sCmd, "Daily_LevelSettlement", StringComparison.Ordinal) ||
+            string.Equals(sCmd, "Role_LevelSettlement", StringComparison.Ordinal) ||
+            string.Equals(sCmd, "Chapter_LevelSettle", StringComparison.Ordinal))
         {
-            return new JsonArray();
+            return await StageSettlement.GrantAsync(connection.Player!, tbParam, wrapShowAward: false);
         }
 
         if (string.Equals(sCmd, "Chapter_NewPrologueSettlement", StringComparison.Ordinal))
         {
-            var result = new JsonObject();
-            if (tbParam is JsonObject source && source.TryGetPropertyValue("bWaitServer", out var bWaitServer))
-            {
-                result["bWaitServer"] = bWaitServer?.DeepClone();
-            }
-            result["tbShowAward"] = new JsonArray();
-            return result;
+            return await StageSettlement.GrantAsync(connection.Player!, tbParam, wrapShowAward: true);
         }
 
         if (string.Equals(sCmd, "BossPvpLogic_LevelSettlement", StringComparison.Ordinal))
         {
             var normalized = NormalizeBossPvpSettlement(tbParam);
             var (response, sync) = BossPvpService.HandleSettlement(connection.Player!, normalized);
-            extraSync = sync;
-            return response;
+            return (response, sync);
         }
 
         if (string.Equals(sCmd, "BossPvpLogic_LevelFail", StringComparison.Ordinal))
         {
             var (response, sync) = BossPvpService.HandleFail(connection.Player!, tbParam);
-            extraSync = sync;
-            return response;
+            return (response, sync);
         }
 
         if (string.Equals(sCmd, "TowerLevel_LevelSettlement", StringComparison.Ordinal))
         {
             var (response, sync) = TowerLevel_LevelSettlement.HandleSettlement(connection.Player!, tbParam);
-            extraSync = sync;
-            return response;
+            return (response, sync);
         }
 
         if (string.Equals(sCmd, "TowerEventChapter_LevelSettlement", StringComparison.Ordinal))
         {
             var (response, sync) = TowerEventChapter_LevelSettlement.HandleSettlement(connection.Player!, tbParam);
-            extraSync = sync;
-            return response;
+            return (response, sync);
         }
 
         if (string.Equals(sCmd, "VirCaptureTower_LevelSettlement", StringComparison.Ordinal))
         {
             var (response, sync) = VirCaptureTower_LevelSettlement.HandleSettlement(connection.Player!, tbParam);
-            extraSync = sync;
-            return response;
+            return (response, sync);
         }
 
         if (string.Equals(sCmd, "DreamCard_LevelSettlement", StringComparison.Ordinal))
         {
             var (response, sync) = DreamCard_LevelSettlement.HandleSettlement(connection.Player!, tbParam);
-            extraSync = sync;
-            return response;
+            return (response, sync);
         }
 
-        return tbParam?.DeepClone() ?? new JsonObject();
+        return (tbParam?.DeepClone() ?? new JsonObject(), null);
     }
 
     private static JsonNode? NormalizeBossPvpSettlement(JsonNode? tbParam)

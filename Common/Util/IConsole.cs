@@ -17,7 +17,13 @@ public class IConsole
 
     public static void InitConsole()
     {
-        Console.Title = ConfigManager.Config.GameServer.GameServerName;
+        try
+        {
+            Console.Title = ConfigManager.Config.GameServer.GameServerName;
+        }
+        catch
+        {
+        }
     }
 
     public static int GetWidth(string str)
@@ -28,18 +34,26 @@ public class IConsole
 
     public static void RedrawInput(string input, bool hasPrefix = true)
     {
-        var length = GetWidth(input);
-        if (hasPrefix)
+        try
         {
-            input = Prefix + input;
-            length += GetWidth(PrefixContent);
+            if (Console.IsOutputRedirected) return;
+            var length = GetWidth(input);
+            if (hasPrefix)
+            {
+                input = Prefix + input;
+                length += GetWidth(PrefixContent);
+            }
+
+            if (Console.GetCursorPosition().Left > 0)
+                Console.SetCursorPosition(0, Console.CursorTop);
+
+            var bufferWidth = Math.Max(length, Console.BufferWidth);
+            Console.Write(input + new string(' ', Math.Max(0, bufferWidth - length)));
+            Console.SetCursorPosition(length, Console.CursorTop);
         }
-
-        if (Console.GetCursorPosition().Left > 0)
-            Console.SetCursorPosition(0, Console.CursorTop);
-
-        Console.Write(input + new string(' ', Console.BufferWidth - length));
-        Console.SetCursorPosition(length, Console.CursorTop);
+        catch
+        {
+        }
     }
 
     #region Handlers
@@ -65,16 +79,22 @@ public class IConsole
 
     public static void HandleBackspace()
     {
-        if (CursorIndex <= 0) return;
-        CursorIndex--;
-        var targetWidth = GetWidth(Input[CursorIndex].ToString());
-        Input.RemoveAt(CursorIndex);
+        try
+        {
+            if (CursorIndex <= 0) return;
+            CursorIndex--;
+            var targetWidth = GetWidth(Input[CursorIndex].ToString());
+            Input.RemoveAt(CursorIndex);
 
-        var (left, _) = Console.GetCursorPosition();
-        Console.SetCursorPosition(left - targetWidth, Console.CursorTop);
-        var remain = new string([.. Input.Skip(CursorIndex)]);
-        Console.Write(remain + new string(' ', targetWidth));
-        Console.SetCursorPosition(left - targetWidth, Console.CursorTop);
+            var (left, _) = Console.GetCursorPosition();
+            Console.SetCursorPosition(left - targetWidth, Console.CursorTop);
+            var remain = new string([.. Input.Skip(CursorIndex)]);
+            Console.Write(remain + new string(' ', targetWidth));
+            Console.SetCursorPosition(left - targetWidth, Console.CursorTop);
+        }
+        catch
+        {
+        }
     }
 
     public static void HandleUpArrow()
@@ -113,43 +133,82 @@ public class IConsole
 
     public static void HandleLeftArrow()
     {
-        if (CursorIndex <= 0) return;
+        try
+        {
+            if (CursorIndex <= 0) return;
 
-        var (left, _) = Console.GetCursorPosition();
-        CursorIndex--;
-        Console.SetCursorPosition(left - GetWidth(Input[CursorIndex].ToString()), Console.CursorTop);
+            var (left, _) = Console.GetCursorPosition();
+            CursorIndex--;
+            Console.SetCursorPosition(left - GetWidth(Input[CursorIndex].ToString()), Console.CursorTop);
+        }
+        catch
+        {
+        }
     }
 
     public static void HandleRightArrow()
     {
-        if (CursorIndex >= Input.Count) return;
+        try
+        {
+            if (CursorIndex >= Input.Count) return;
 
-        var (left, _) = Console.GetCursorPosition();
-        CursorIndex++;
-        Console.SetCursorPosition(left + GetWidth(Input[CursorIndex - 1].ToString()), Console.CursorTop);
+            var (left, _) = Console.GetCursorPosition();
+            CursorIndex++;
+            Console.SetCursorPosition(left + GetWidth(Input[CursorIndex - 1].ToString()), Console.CursorTop);
+        }
+        catch
+        {
+        }
     }
 
     public static void HandleInput(ConsoleKeyInfo keyInfo)
     {
-        if (char.IsControl(keyInfo.KeyChar)) return;
-        if (Input.Count >= (Console.BufferWidth - PrefixContent.Length)) return;
-        HandleInput(keyInfo.KeyChar);
+        try
+        {
+            if (char.IsControl(keyInfo.KeyChar)) return;
+            if (Input.Count >= (Console.BufferWidth - PrefixContent.Length)) return;
+            HandleInput(keyInfo.KeyChar);
+        }
+        catch
+        {
+            if (!char.IsControl(keyInfo.KeyChar))
+                HandleInput(keyInfo.KeyChar);
+        }
     }
 
     public static void HandleInput(char keyChar)
     {
-        Input.Insert(CursorIndex, keyChar);
-        CursorIndex++;
+        try
+        {
+            Input.Insert(CursorIndex, keyChar);
+            CursorIndex++;
 
-        var (left, _) = Console.GetCursorPosition();
-        Console.Write(new string([.. Input.Skip(CursorIndex - 1)]));
-        Console.SetCursorPosition(left + GetWidth(keyChar.ToString()), Console.CursorTop);
+            var (left, _) = Console.GetCursorPosition();
+            Console.Write(new string([.. Input.Skip(CursorIndex - 1)]));
+            Console.SetCursorPosition(left + GetWidth(keyChar.ToString()), Console.CursorTop);
+        }
+        catch
+        {
+        }
     }
 
     #endregion
 
     public static async Task ListenConsole(CancellationToken exitToken)
     {
+        if (Console.IsInputRedirected)
+        {
+            var reader = Console.In;
+            while (!exitToken.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(exitToken);
+                if (line == null) break;
+                if (line.StartsWith('/')) line = line[1..].Trim();
+                OnConsoleExcuteCommand?.Invoke(line);
+            }
+            return;
+        }
+
         while (!exitToken.IsCancellationRequested)
         {
             ConsoleKeyInfo keyInfo;
@@ -166,7 +225,7 @@ public class IConsole
             {
                 break;
             }
-            catch (InvalidOperationException)
+            catch (Exception)
             {
                 await Task.Delay(50, exitToken);
                 continue;

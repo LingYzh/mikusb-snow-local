@@ -22,6 +22,10 @@ public sealed class ProxyServer(
         "seasungames.com",
         "snowbreak-game.com",
         "xoyo.games",
+        "xoyo.com",
+        "xgsdk.com",
+        "cbjq.com",
+        "xoyocdn.com",
         "yo.games",
         "qcloud.com",
         "xqdata.xoyo.games",
@@ -188,18 +192,52 @@ public sealed class ProxyServer(
         if (IsSelfReference(request.Host, request.Port, listenPort))
             throw new IOException("Proxy self-reference detected");
 
-        if (!ShouldRedirect(request.Host))
+        if (request.Port is 5100 or 5200 or 5201 or 21000 or 21001)
+            return ("127.0.0.1", ConfigManager.Config.GameServer.Port);
+
+        if (IsVpnFakeIp(request.Host) && request.Port is 80 or 443)
+            return ("127.0.0.1", request.Port == 80 ? ConfigManager.Config.HttpServer.Port : 13443);
+
+        if (IsOfficialGameIp(request.Host))
+            return ("127.0.0.1", ConfigManager.Config.GameServer.Port);
+
+        if (!ShouldRedirect(request.Host) && !IsVpnFakeIp(request.Host))
             return (request.Host, request.Port);
 
         return ("127.0.0.1", request.Port switch
         {
             80 => ConfigManager.Config.HttpServer.Port,
+            443 => 13443,
             893 => 31443,
+            11443 => 11443,
             13443 => 13443,
-            18443 => 18443,
+            18443 => 13443,
+            19443 => 19443,
             31443 => 31443,
+            5100 or 5200 or 5201 or 21000 or 21001 => ConfigManager.Config.GameServer.Port,
             _ => 13443
         });
+    }
+
+    private static bool IsOfficialGameIp(string host)
+    {
+        if (!IPAddress.TryParse(host, out var address))
+            return false;
+        var bytes = address.GetAddressBytes();
+        if (bytes.Length != 4)
+            return false;
+        return (bytes[0] == 42 && bytes[1] == 192)
+            || (bytes[0] == 124 && bytes[1] == 156)
+            || (bytes[0] == 43 && bytes[1] == 129)
+            || (bytes[0] == 150 && bytes[1] == 109);
+    }
+
+    private static bool IsVpnFakeIp(string host)
+    {
+        if (!IPAddress.TryParse(host, out var address))
+            return false;
+        var bytes = address.GetAddressBytes();
+        return bytes.Length == 4 && bytes[0] == 198 && (bytes[1] == 18 || bytes[1] == 19);
     }
 
     private static bool ShouldRedirect(string host)

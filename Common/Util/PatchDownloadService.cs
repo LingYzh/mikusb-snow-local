@@ -1,4 +1,4 @@
-using System.Net.Http.Headers;
+﻿using System.Net.Http.Headers;
 
 namespace MikuSB.Util;
 
@@ -7,7 +7,7 @@ public static class PatchDownloadService
     private static readonly Logger Logger = new("PatchDownloader");
     private const string PatchRelativePath = @"Patch\MikuSB-Patch.dll";
     private const string PatchDownloadUrl = "https://github.com/Kei-Luna/MikuSB-Patch/releases/download/MikuSB-Patch/MikuSB-Patch.dll";
-    private const int DownloadTimeoutSeconds = 60;
+    private const int DownloadTimeoutSeconds = 15;
 
     public static void EnsurePatchPresent()
     {
@@ -15,20 +15,27 @@ public static class PatchDownloadService
         if (File.Exists(patchPath))
             return;
 
-        Directory.CreateDirectory(Path.GetDirectoryName(patchPath)!);
-        Logger.Warn($"Patch DLL not found. Downloading to {patchPath}.");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(patchPath)!);
+            Logger.Warn($"Patch DLL not found. Attempting download to {patchPath}.");
 
-        using var client = CreateHttpClient();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(DownloadTimeoutSeconds));
-        using var response = client.GetAsync(PatchDownloadUrl, HttpCompletionOption.ResponseHeadersRead, cts.Token)
-            .GetAwaiter().GetResult();
-        response.EnsureSuccessStatusCode();
+            using var client = CreateHttpClient();
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(DownloadTimeoutSeconds));
+            using var response = client.GetAsync(PatchDownloadUrl, HttpCompletionOption.ResponseHeadersRead, cts.Token)
+                .GetAwaiter().GetResult();
+            response.EnsureSuccessStatusCode();
 
-        using var source = response.Content.ReadAsStreamAsync(cts.Token).GetAwaiter().GetResult();
-        using var destination = File.Create(patchPath);
-        source.CopyTo(destination);
+            using var source = response.Content.ReadAsStreamAsync(cts.Token).GetAwaiter().GetResult();
+            using var destination = File.Create(patchPath);
+            source.CopyTo(destination);
 
-        Logger.Info("Patch DLL download completed.");
+            Logger.Info("Patch DLL download completed.");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Patch DLL download skipped or failed (offline mode): {ex.Message}");
+        }
     }
 
     private static HttpClient CreateHttpClient()
