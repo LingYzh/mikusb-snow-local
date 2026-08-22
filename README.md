@@ -1,103 +1,34 @@
-# MikuSB
+# Snowbreak local workspace
 
-<strong>MikuSB</strong> is a server emulator of a certain dungeon anime game.   
-`SdkServer`, `GameServer`, and an optional local HTTP/HTTPS proxy are started from a single `net9.0` application.  
+This repository tracks the source, patches, launchers and documentation needed to turn an existing, normal Windows game client into a local client/server workspace. It intentionally does **not** contain a game client, downloaded resources, player database, captures or built runtime output.
 
-[Discord](https://discord.gg/aMwCu9JyUR)
+## First-time setup
 
-日本語のドキュメントは [README_jp.md](README_jp.md) にあります。
+1. Install the .NET 10 SDK on Windows.
+2. Clone this repository to a writable ASCII-path folder, for example `D:\Snow`.
+3. Provide a normal client installation whose root contains `Game\Binaries\Win64\Game.exe`.
+4. In PowerShell, run:
 
-## Scam Warning
+   ```powershell
+   Set-ExecutionPolicy -Scope Process Bypass
+   .\Setup-LocalWorkspace.ps1 -ClientRoot 'E:\Games\Snowbreak'
+   ```
 
-MikuSB is completely free and open source.
-If anyone sold you this server or charged money to provide it, that was a scam.
-Request a refund immediately and report the seller to us on Discord with any relevant proof or purchase details.
+   Add `-Rebuild` only to update an existing `Server\` runtime in place. Local player data, resources and configuration are preserved; only its configured client path and `-userdir` argument are refreshed.
+5. Start `SnowbreakLocalLauncher.exe`. The first use requests elevation to install the local login routing. It leaves the selected system proxy and VPN enabled, adding bypasses only for the local login domains.
 
-## Overview
+`Start-LocalServer.cmd` and `Start-LocalGame.cmd` are also available for separate launches. Closing the game or the GUI never stops the server; stop the server from its own console.
 
-- `SdkServer`
-  - Serves HTTP APIs and dispatch responses
-  - Returns server lists, version queries, and fallback responses
-- `GameServer`
-  - Accepts TCP-based game connections
-  - Handles `ReqCallGS` and some normal packets
-- `Proxy`
-  - Listens on `127.0.0.1:8888` when enabled
-  - Redirects some Snowbreak-related domains to the local `SdkServer`
-- `Common` / `Proto` / `TcpSharp`
-  - Shared data, protobuf definitions, and networking infrastructure
+The first server startup downloads the public resource archive if `Server\Resources` is missing. This is the only bootstrap download; it is not tracked in Git.
 
-## Project Layout
+## Repository boundaries
 
-- [MikuSB](MikuSB): entry point
-- [SdkServer](SdkServer): HTTP server and dispatch
-- [GameServer](GameServer): main game server
-- [Proxy](Proxy): local proxy
-- [Common](Common): config, database, and shared utilities
-- [Proto](Proto): protobuf definitions
+- `MikuSB\` — source code, tracked patch DLL, and source configuration template.
+- Root scripts/docs — portable setup and local login routing.
+- `data\`, `Server\`, `Patches\`, `Tools\`, captures and generated executables — deliberately ignored local state.
 
-## Requirements
+Do not commit a client installation, account data, resource archive or build output. The setup script writes the selected client path only to the ignored runtime config, never to source control.
 
-- [.NET SDK 10.0](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)
+## Current limitation
 
-## Running
-
-1. Restore dependencies and build.
-```powershell
-dotnet build
-```
-2. Set `GamePath` in `Config.json` to the path of your game executable.
-3. Start the server and run the `game` command.
-4. Create an account in the server console.  
-5. Enjoy.
-
-## Feature List
-
-* [x] Login and basic account entry
-* [x] Player data loading
-* [x] Inventory loading
-* [x] Character loading
-* [x] Skin loading
-* [x] Weapon loading
-* [x] Lobby display character switching
-* [x] Character skin switching
-* [x] Character skin form switching
-* [x] Weapon replacement
-* [x] Weapon upgrade
-* [x] Player rename
-* [x] Basic saving of currently supported lobby state
-* [✓] Main chapter stage entry and related flow
-* [✓] Daily stage entry and related flow
-* [✓] Basic player setting synchronization
-* [✓] Basic profile synchronization
-* [✓] Activity-related requests
-* [✓] Achievement-related requests
-* [✓] Lineup-related requests
-* [✓] Preview-related requests
-* [✓] Some shop-related requests
-* [ ] Full combat flow
-* [ ] Mission / quest progression
-* [ ] Gacha / recruitment systems
-* [ ] Complete shop behavior
-* [ ] Multiplayer systems
-* [ ] Base / dorm systems
-* [ ] Full client API coverage
-
-## Contributors
-- [Naruse](https://github.com/DevilProMT)
-- [Kei-Luna](https://github.com/Kei-Luna)
-
-## License
-This repository is licensed under the [MIT License](LICENSE).
-
-## Notes on use
-This software is intended for research and testing purposes in a local environment.  
-It is not intended for unauthorized access to, interference with, or commercial use of official services.
-
-## Legal Disclaimer
-MikuSB was developed for educational and research purposes.  
-- All trademarks, copyrights, and other intellectual property related to the original game and its associated franchise belong to their respective owners.  
-- This repository does not include any copyrighted game assets, binaries, or master data.  
-- Use this software at your own risk. The authors assume no responsibility for any damages or legal consequences resulting from its use.  
-
-If you are a rights holder and have any concerns regarding this software, please contact `devilpromt` or `kei_luna` on Discord.
+The GUI's multi-period gacha display editor is retained as an analysis interface only. The live client table is encrypted/compiled; deploying plaintext or a guessed table patch can prevent login. The current safe release does not install an active gacha display override.
