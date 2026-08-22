@@ -1,76 +1,135 @@
-# Snowbreak local workspace / 尘白禁区本地双端工作区
+# Offline local client-server workspace / 离线本地双端工作区
 
-This repository contains the source, local launcher, injection patch and deployment tooling for turning an existing Windows client into a self-contained local client/server workspace for offline research and testing.
+This repository contains source code, a local launcher, an injection patch and deployment tooling for adapting an existing Windows client into a self-contained local client/server workspace for offline research and testing.
 
-本仓库包含将已有 Windows 客户端改造成离线本地双端所需的服务端源码、本地启动器、注入补丁和部署工具，用于离线研究与测试。
+本仓库包含将已有 Windows 客户端适配为离线本地双端所需的源码、本地启动器、注入补丁和部署工具，用于离线研究与测试。
 
-It does **not** distribute any game client, game assets, downloaded master data, account data, captures or built runtime files.
+It does **not** distribute the target client, client assets, downloaded data, account data, captures or built runtime files.
 
-本仓库**不**分发游戏客户端、美术与游戏资源、下载的数据表、账号数据、抓包或编译后的运行时文件。
+本仓库**不**分发目标客户端、客户端资源、下载数据、账号数据、抓包或编译后的运行时文件。
 
 ## Current status / 当前状态
 
 - Local server startup and client login are operational.
 - The local workflow includes shop, inventory, combat-reward, ordinary gacha, weapon/accessory and supporter-card adaptations developed in this workspace.
-- The launcher preserves the selected system proxy and VPN. Only the local-login game domains are configured to bypass that proxy.
-- Closing the game client or GUI does not stop the server; stop the server from its own console when needed.
+- The launcher preserves the selected system proxy and VPN. Only the local-login endpoints are configured to bypass that proxy.
+- Closing the client or GUI does not stop the server; stop the server from its own console when needed.
 
 - 本地服务端启动与客户端登录已可用。
 - 本工作区已包含商店、背包、战斗奖励、常规抽卡、武器/配件及后勤卡等离线适配。
-- 启动器会保留当前系统代理与 VPN，仅让本地登录所需的游戏域名绕过代理。
+- 启动器会保留当前系统代理与 VPN，仅让本地登录所需端点绕过代理。
 - 退出客户端或 GUI 不会自动关闭服务端；需要停止服务端时，请在它自己的控制台中操作。
 
 ## Requirements / 环境要求
 
-1. Windows 10/11 and the .NET 10 SDK.
-2. A normal client installation whose root contains `Game\Binaries\Win64\Game.exe`.
-3. A writable workspace path. An ASCII-only path such as `D:\Snow` is recommended for Windows PowerShell compatibility.
+1. Windows 10/11 and the .NET 10 SDK. Confirm it is available with `dotnet --info`.
+2. A compatible, normally installed Windows client. Its **root** must contain `Game\Binaries\Win64\Game.exe`.
+3. A writable workspace path. An ASCII-only path such as `D:\LocalWorkspace` is recommended for Windows PowerShell compatibility.
+4. Network access for the first server start when the public resource archive has not yet been downloaded.
 
-1. Windows 10/11 与 .NET 10 SDK。
-2. 一份正常客户端，根目录内须存在 `Game\Binaries\Win64\Game.exe`。
-3. 可写入的工作区路径。为兼容 Windows PowerShell，推荐使用 `D:\Snow` 这类纯 ASCII 路径。
+1. Windows 10/11 与 .NET 10 SDK；可用 `dotnet --info` 确认。
+2. 一份已正常安装且兼容的 Windows 客户端；其**根目录**内必须存在 `Game\Binaries\Win64\Game.exe`。
+3. 可写入的工作区路径。为兼容 Windows PowerShell，推荐使用 `D:\LocalWorkspace` 这类纯 ASCII 路径。
+4. 如果尚未下载公开资源档案，首次启动服务端时需要网络连接。
 
-## First-time setup / 首次部署
+## First-time deployment / 首次部署
 
-Clone the repository, open PowerShell at its root, and point the setup script to the **client root**, not the `Game` subdirectory:
+### 1. Clone and prepare / 克隆并准备目录
 
-克隆仓库后，在根目录打开 PowerShell，并将部署脚本指向**客户端根目录**，而不是 `Game` 子目录：
+Clone this repository into a new writable directory. Do not place the client installation inside that directory, and do not copy a pre-existing `Server\` directory into it.
+
+将仓库克隆到新的可写目录。不要将客户端安装目录放入该目录，也不要把已有的 `Server\` 运行时目录复制进来。
+
+```powershell
+git clone <your-repository-url> D:\LocalWorkspace
+Set-Location D:\LocalWorkspace
+```
+
+Before continuing, close all client processes. Verify the chosen path is the **client root** rather than the `Game` folder itself:
+
+继续前请关闭所有客户端进程。确认选择的是**客户端根目录**，而不是 `Game` 文件夹本身：
+
+```powershell
+Test-Path 'E:\Client\Game\Binaries\Win64\Game.exe'
+```
+
+The result must be `True`.
+
+结果必须为 `True`。
+
+### 2. Build the local runtime / 构建本地运行时
+
+Allow script execution only for the current PowerShell window, then provide the verified client root to the setup script:
+
+仅为当前 PowerShell 窗口允许脚本执行，然后把已验证的客户端根目录交给部署脚本：
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\Setup-LocalWorkspace.ps1 -ClientRoot 'E:\Games\Snowbreak'
+.\Setup-LocalWorkspace.ps1 -ClientRoot 'E:\Client'
 ```
 
-The script publishes the local server, injected client launcher and GUI; copies the tracked patch DLL; then writes the selected client path only to the ignored runtime config at `Server\Config\Config.json`.
+The script performs the following work:
 
-脚本会发布本地服务端、注入式客户端启动器与 GUI，复制已追踪的补丁 DLL，并仅将所选客户端路径写入被忽略的运行时配置 `Server\Config\Config.json`。
+脚本会完成以下工作：
 
-For an existing runtime, use `-Rebuild`. Player data, resources and other configuration are preserved; the client path and `-userdir` argument are refreshed.
+1. Publishes `Server\MikuSB.exe`, the local server.
+2. Publishes `Server\SnowLauncher.exe`, the injected client launcher.
+3. Copies the tracked patch DLL to `Server\Patch\MikuSB-Patch.dll`.
+4. Creates `Server\Config\Config.json` and writes the supplied client path plus a local `-userdir` path.
+5. Publishes the GUI launcher and its required companion files at the repository root.
 
-如需更新已有运行时，使用 `-Rebuild`。玩家数据、资源和其他配置会被保留；只刷新客户端路径与 `-userdir` 参数。
+1. 发布本地服务端 `Server\MikuSB.exe`。
+2. 发布注入式客户端启动器 `Server\SnowLauncher.exe`。
+3. 将已追踪补丁 DLL 复制到 `Server\Patch\MikuSB-Patch.dll`。
+4. 创建 `Server\Config\Config.json`，写入所提供的客户端路径及本地 `-userdir` 路径。
+5. 在仓库根目录发布 GUI 启动器及其运行所需文件。
 
-```powershell
-.\Setup-LocalWorkspace.ps1 -ClientRoot 'E:\Games\Snowbreak' -Rebuild
-```
+The selected client path is written only to ignored runtime state; it is never written into the source-controlled configuration template.
 
-## Starting the local pair / 启动本地双端
+所选客户端路径只会写入被忽略的运行时状态，不会写入受版本控制的配置模板。
 
-Start `SnowbreakLocalLauncher.exe` from the repository root and choose the combined start action. The first routing setup requests administrator permission to add the local hosts entries, loopback address and localhost port proxies. It keeps the current VPN/system proxy enabled and bypasses it only for the required local-login domains.
+### 3. Configure local login routing / 配置本地登录路由
 
-从仓库根目录启动 `SnowbreakLocalLauncher.exe` 并选择启动本地双端。首次配置登录路由时会请求管理员权限，用于写入本地 hosts、回环地址和本机端口转发；它会保留当前 VPN/系统代理，仅绕过必要的本地登录域名。
+Run the GUI launcher created at the repository root and choose the combined start action. The first routing setup requests administrator permission to add local hosts entries, a loopback address and localhost port proxies.
 
-For separate launches, use:
+从仓库根目录运行生成的 GUI 启动器，选择启动本地双端。首次配置登录路由时会请求管理员权限，以添加本地 hosts 条目、回环地址和本机端口转发。
 
-若需要分别启动，可使用：
+The routing action does not disable or replace the selected VPN/system proxy. It preserves that setting and bypasses it only for the required local-login endpoints. Approve the Windows elevation prompt; if it is declined, the client cannot use the local login route.
+
+该路由操作不会关闭或替换当前 VPN/系统代理；它会保留现有设置，仅让必要的本地登录端点绕过代理。请批准 Windows 提权提示；若拒绝，客户端无法使用本地登录路由。
+
+### 4. First start / 首次启动
+
+Keep the GUI open while it starts the server and client. If `Server\Resources` is missing, the server first retrieves the required public resource archive; wait for that operation to finish before treating startup as failed. Server logs are available under `Server\Config\Logs\`.
+
+保持 GUI 打开，等待其启动服务端和客户端。如果缺少 `Server\Resources`，服务端会先获取所需的公开资源档案；完成前请不要将其视为启动失败。服务端日志位于 `Server\Config\Logs\`。
+
+For separate starts, first complete the routing step, then use:
+
+如需分别启动，请先完成路由配置，然后使用：
 
 ```text
 Start-LocalServer.cmd
 Start-LocalGame.cmd
 ```
 
-If `Server\Resources` is absent, the first server start retrieves the required public resource archive. It remains local and is never tracked by Git.
+The server is intentionally independent of the GUI and client lifecycle. Closing the client or GUI does not stop it.
 
-若 `Server\Resources` 不存在，服务端首次启动会获取所需的公开资源档案。它只保留在本机，绝不会被 Git 追踪。
+服务端的生命周期刻意独立于 GUI 和客户端；关闭客户端或 GUI 不会停止服务端。
+
+## Updating an existing runtime / 更新已有运行时
+
+Close the client first, then run the same command with `-Rebuild`:
+
+请先关闭客户端，然后使用同一命令加上 `-Rebuild`：
+
+```powershell
+.\Setup-LocalWorkspace.ps1 -ClientRoot 'E:\Client' -Rebuild
+```
+
+`-Rebuild` refreshes executable files, the patch DLL, the GUI and the configured client path. Player data, downloaded resources and other runtime configuration remain in place.
+
+`-Rebuild` 会更新可执行文件、补丁 DLL、GUI 与已配置的客户端路径。玩家数据、下载资源和其他运行时配置会保留在原处。
 
 ## Repository layout / 仓库边界
 
