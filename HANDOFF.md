@@ -19,6 +19,8 @@ Use `Setup-LocalWorkspace.ps1 -ClientRoot <normal-client-root>` from the reposit
 
 It creates an ignored `Server\Config\Config.json` and inserts only the supplied client path. At first start, the server retrieves its publicly hosted resource archive when needed.
 
+The GUI is published first under the ignored `Server\LocalLauncher` directory and then copied to the repository root. Publishing it directly to the root causes a .NET/MSBuild entry-point failure in this workspace layout.
+
 `Configure-LocalLoginRouting.ps1` is the only administrator step. It adds the required local hosts, loopback IP and localhost port proxies, while retaining the active VPN/system proxy and bypassing only the local game-login domains. It uses the absolute Windows PowerShell path and `-EP Bypass` so it does not depend on shell PATH or a non-ASCII script filename.
 
 ## Verified/local behavior

@@ -83,7 +83,11 @@ $config.Loader.Arguments = @($config.Loader.Arguments | Where-Object { -not $_.S
 $config.Loader.Arguments += "-userdir=$(Join-Path $serverRoot 'Client_User_Data')"
 $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $configPath -Encoding UTF8
 
-Invoke-DotnetPublish -ProjectPath $localLauncherProject -OutputDirectory $workspaceRoot
+$guiPublishDirectory = Join-Path $serverRoot 'LocalLauncher'
+Invoke-DotnetPublish -ProjectPath $localLauncherProject -OutputDirectory $guiPublishDirectory
+Get-ChildItem -LiteralPath $guiPublishDirectory -Filter 'SnowbreakLocalLauncher.*' -File | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $workspaceRoot $_.Name) -Force
+}
 
 Write-Host ''
 Write-Host 'Setup complete.'
