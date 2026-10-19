@@ -143,6 +143,42 @@ Never commit a client installation, downloaded resources, player database, captu
 
 请勿提交客户端、下载资源、玩家数据库、抓包或生成的构建输出。`.gitignore` 已专门限定这些边界。
 
+## Mobile terminal deployment / 移动终端部署支持
+
+This workspace supports cross-compiling and running the local server standalone on ARM64 mobile terminal environments (e.g., Linux / POSIX user-space layers).
+
+本工作区支持将本地服务端交叉编译并在 ARM64 架构的移动终端环境（如 Linux / POSIX 用户态层）中独立运行。
+
+### 1. Build mobile runtime / 构建移动端运行时
+
+Run the mobile publishing script from PowerShell:
+
+在 PowerShell 中运行移动端发布脚本：
+
+```powershell
+.\Publish-MobileServer.ps1 -OutputDirectory Server_arm64
+```
+
+The script publishes a self-contained ARM64 runtime (`linux-arm64`) using directory deployment (`PublishSingleFile=false` to avoid loader page-alignment constraints on mobile environments), copies configuration templates, and generates an automated `start.sh` launcher.
+
+该脚本会发布一个自包含的 ARM64 运行时（`linux-arm64`），采用目录部署形式（`PublishSingleFile=false`，以规避移动端环境下的加载器内存页对齐限制），复制配置模板并生成自动化的 `start.sh` 启动脚本。
+
+### 2. Run on mobile terminal / 在移动终端中运行
+
+1. Transfer the generated directory to the mobile environment.
+2. In host environments lacking standard Glibc dynamic linkers, use a user-space runner (`glibc-runner` via `grun ./MikuSB`) or a container layer (`proot-distro`).
+3. Ensure the required runtime environment variables are configured:
+    - `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1`
+    - `TMPDIR` redirected to a writable path within the local sandbox.
+4. Execute `./start.sh` to start the local service listening on loopback ports.
+
+1. 将生成的目录传输到移动终端环境中。
+2. 在缺少标准 Glibc 动态链接器的宿主环境中，可配合用户态运行器（通过 `glibc-runner` 执行 `grun ./MikuSB`）或轻量容器（如 `proot-distro`）提供标准环境。
+3. 确保配置了必要的运行时环境变量：
+    - `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1`
+    - `TMPDIR` 重定向至本地沙盒内的可写路径。
+4. 执行 `./start.sh` 即可启动监听本地回环端口的服务。
+
 ## Known limitation / 已知限制
 
 The server can provide the complete gacha pool list, but the client-side presentation/group table is encrypted or compiled. The GUI therefore does not deploy multi-period gacha-display patches: guessed or plaintext overrides can leave the client stuck at login completion. The functionality remains an analysis task until the original client format is reproduced.

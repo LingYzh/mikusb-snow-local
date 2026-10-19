@@ -9,11 +9,13 @@
 !/Start-LocalServer.cmd
 !/Start-LocalGame.cmd
 !/Configure-LocalLoginRouting.ps1
+!/Publish-MobileServer.ps1
 !/MikuSB/
 !/MikuSB/**
 
-# Runtime output produced by Setup-LocalWorkspace.ps1.
+# Runtime output produced by setup scripts.
 /Server/
+/Server_arm64/
 /Patches/
 /Tools/
 /MikuSB/Tools/
